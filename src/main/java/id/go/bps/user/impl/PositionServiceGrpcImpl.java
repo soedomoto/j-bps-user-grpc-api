@@ -55,7 +55,9 @@ public class PositionServiceGrpcImpl extends PositionServiceGrpc.PositionService
     public void get(RequestID request, StreamObserver<Position> responseObserver) {
         try {
             PositionModel positionModel = server.positionDao.queryForId(request.getId());
-            responseObserver.onNext(_positionModel2Pb(positionModel));
+            if(positionModel != null) {
+                responseObserver.onNext(_positionModel2Pb(positionModel));
+            }
         } catch (SQLException e) {
             logger.severe(e.getMessage());
             responseObserver.onError(e);
