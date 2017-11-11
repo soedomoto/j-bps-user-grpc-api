@@ -3,6 +3,7 @@ package id.go.bps.user;
 import com.j256.ormlite.dao.Dao;
 import com.j256.ormlite.dao.DaoManager;
 import com.j256.ormlite.jdbc.JdbcConnectionSource;
+import com.j256.ormlite.stmt.query.In;
 import com.j256.ormlite.support.ConnectionSource;
 import com.j256.ormlite.table.TableUtils;
 import id.go.bps.user.impl.*;
@@ -12,6 +13,8 @@ import org.apache.commons.cli.*;
 
 import java.io.IOException;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.logging.Logger;
 
 public class Server {
@@ -29,7 +32,6 @@ public class Server {
         this.port = port;
 
         try {
-            // this uses h2 by default but change to match your database
             String databaseUrl = "jdbc:h2:mem:account";
             ConnectionSource connectionSource = new JdbcConnectionSource(databaseUrl);
 
@@ -49,7 +51,7 @@ public class Server {
             userTypeDao = DaoManager.createDao(connectionSource, UserTypeModel.class);
             TableUtils.createTableIfNotExists(connectionSource, UserTypeModel.class);
         } catch (SQLException e) {
-            e.printStackTrace();
+            logger.severe(e.getMessage());
         }
     }
 
@@ -62,12 +64,11 @@ public class Server {
                 .addService(new UserTypeServiceGrpcImpl(Server.this))
                 .build()
                 .start();
-        logger.info("Server started, listening on " + port);
+        logger.info("User Grpc API Server is started, listening on " + port);
 
         Runtime.getRuntime().addShutdownHook(new Thread() {
             @Override
             public void run() {
-                // Use stderr here since the logger may have been reset by its JVM shutdown hook.
                 System.err.println("*** shutting down gRPC server since JVM is shutting down");
                 Server.this.stop();
                 System.err.println("*** server shut down");
@@ -81,22 +82,16 @@ public class Server {
         }
     }
 
-    /**
-     * Await termination on the main thread since the grpc library uses daemon threads.
-     */
     private void blockUntilShutdown() throws InterruptedException {
         if (server != null) {
             server.awaitTermination();
         }
     }
 
-    /**
-     * Main launches the server from the command line.
-     */
     public static void main(String[] args) throws IOException, InterruptedException, ParseException {
         Options options = new Options();
         options.addOption("h", "help", false, "print this message");
-        options.addOption("p", "port", true, "Set port");
+        options.addOption("p", "ports", true, "Set port range with format \"start[-end]\"");
 
         CommandLineParser parser = new DefaultParser();
         CommandLine cmd = parser.parse( options, args);
@@ -107,13 +102,44 @@ public class Server {
             return;
         }
 
-        Integer port = 50051;
-        if(cmd.hasOption("p")) {
-            port = Integer.valueOf(cmd.getOptionValue("p"));
+
+        String portRange = cmd.getOptionValue("p", "50051");
+        String[] startEnd = portRange.split("-");
+        Integer startPort = null, endPort = null;
+        try {
+            if (startEnd.length == 2) {
+                startPort = Integer.valueOf(startEnd[0]);
+                endPort = Integer.valueOf(startEnd[1]);
+            } else {
+                startPort = Integer.valueOf(startEnd[0]);
+            }
+        } catch (NumberFormatException e) {
+            logger.severe(e.getMessage());
+            return;
         }
 
-        final Server server = new Server(port);
-        server.start();
-        server.blockUntilShutdown();
+        List<Integer> ports = new ArrayList<Integer>();
+
+        if (startPort != null) {
+            if (endPort != null) {
+                for(int p=startPort; p<=endPort; p++) {
+                    ports.add(p);
+                }
+            } else {
+                ports.add(startPort);
+            }
+        }
+
+        if (ports.size() == 0) {
+            return;
+        }
+
+        List<Server> servers = new ArrayList<Server>();
+        for(Integer port : ports) {
+            servers.add( new Server(port));
+        }
+
+        for(Server server : servers) server.start();
+        for(Server server : servers) server.blockUntilShutdown();
     }
 }
