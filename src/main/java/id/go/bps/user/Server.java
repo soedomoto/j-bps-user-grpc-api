@@ -8,13 +8,24 @@ import com.j256.ormlite.support.ConnectionSource;
 import com.j256.ormlite.table.TableUtils;
 import id.go.bps.user.impl.*;
 import id.go.bps.user.model.*;
+import io.atomix.Atomix;
+import io.atomix.AtomixClient;
+import io.atomix.AtomixReplica;
+import io.atomix.catalyst.transport.Address;
+import io.atomix.catalyst.transport.netty.NettyTransport;
+import io.atomix.copycat.server.storage.Storage;
+import io.atomix.group.DistributedGroup;
 import io.grpc.ServerBuilder;
 import org.apache.commons.cli.*;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.ExecutionException;
 import java.util.logging.Logger;
 
 public class Server {
@@ -64,16 +75,7 @@ public class Server {
                 .addService(new UserTypeServiceGrpcImpl(Server.this))
                 .build()
                 .start();
-        logger.info("User Grpc API Server is started, listening on " + port);
-
-        Runtime.getRuntime().addShutdownHook(new Thread() {
-            @Override
-            public void run() {
-                System.err.println("*** shutting down gRPC server since JVM is shutting down");
-                Server.this.stop();
-                System.err.println("*** server shut down");
-            }
-        });
+        logger.info("User gRPC API Server is started, listening on " + port);
     }
 
     private void stop() {
@@ -91,22 +93,27 @@ public class Server {
     public static void main(String[] args) throws IOException, InterruptedException, ParseException {
         Options options = new Options();
         options.addOption("h", "help", false, "print this message");
-        options.addOption("p", "ports", true, "Set port range with format \"start[-end]\"");
+        options.addOption("p", "ports", true, "Set gRPC server port range with format \"start[-end]\"");
+        options.addOption("P", "registry-port", true, "Set service registry server port");
+        options.addOption("j", "join", true, "Join to cluster server with format host:port");
 
         CommandLineParser parser = new DefaultParser();
         CommandLine cmd = parser.parse( options, args);
         HelpFormatter formatter = new HelpFormatter();
 
         if(cmd.hasOption("help")) {
-            formatter.printHelp( "bps-user", options);
+            formatter.printHelp( "bps-user-grpc-api-server", options);
             return;
         }
 
 
+
         String portRange = cmd.getOptionValue("p", "50051");
         String[] startEnd = portRange.split("-");
-        Integer startPort = null, endPort = null;
+        Integer serviceRegistryPort = null, startPort = null, endPort = null;
         try {
+            serviceRegistryPort = Integer.valueOf(cmd.getOptionValue("P", "8701"));
+
             if (startEnd.length == 2) {
                 startPort = Integer.valueOf(startEnd[0]);
                 endPort = Integer.valueOf(startEnd[1]);
@@ -118,8 +125,22 @@ public class Server {
             return;
         }
 
-        List<Integer> ports = new ArrayList<Integer>();
+        // Run single atomix server
+        if (serviceRegistryPort == null) {
+            logger.severe("No service registry server port defined !!!");
+            return;
+        }
+        
+        AtomixReplica replica = AtomixReplica.builder(new Address("0.0.0.0", serviceRegistryPort))
+                .withTransport(new NettyTransport())
+                .withStorage(Storage.builder()
+                        .withDirectory(System.getProperty("user.dir") + "/logs/" + UUID.randomUUID().toString())
+                        .build())
+                .build();
+        replica.bootstrap().join();
 
+        // Run multiple GRPC servers
+        List<Integer> ports = new ArrayList<Integer>();
         if (startPort != null) {
             if (endPort != null) {
                 for(int p=startPort; p<=endPort; p++) {
@@ -131,6 +152,7 @@ public class Server {
         }
 
         if (ports.size() == 0) {
+            logger.severe("No port(s) defined !!!");
             return;
         }
 
@@ -140,6 +162,35 @@ public class Server {
         }
 
         for(Server server : servers) server.start();
+
+        // Register gRPC service to service registry
+        try {
+            AtomixClient client = AtomixClient.builder().withTransport(new NettyTransport()).build();
+            Atomix atomix = client.connect(new Address("0.0.0.0", serviceRegistryPort)).get();
+            DistributedGroup group = atomix.getGroup("service-helloworld").get();
+            // Add the address in metadata
+            for(Server server : servers) {
+                group.join(Collections.singletonMap("address",
+                        new InetSocketAddress("0.0.0.0", server.port)));
+            }
+        } catch (ExecutionException e) {
+            logger.severe(e.getMessage());
+            return;
+        }
+
+        Runtime.getRuntime().addShutdownHook(new Thread() {
+            @Override
+            public void run() {
+                System.err.println("*** shutting down gRPC server since JVM is shutting down");
+                for(Server server : servers) server.stop();
+                System.err.println("*** gRPC server shut down");
+
+                System.err.println("*** shutting down service registry server since JVM is shutting down");
+                replica.shutdown();
+                System.err.println("*** Service registry server shut down");
+            }
+        });
+
         for(Server server : servers) server.blockUntilShutdown();
     }
 }
