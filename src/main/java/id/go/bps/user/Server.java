@@ -13,6 +13,8 @@ import io.atomix.AtomixClient;
 import io.atomix.AtomixReplica;
 import io.atomix.catalyst.transport.Address;
 import io.atomix.catalyst.transport.netty.NettyTransport;
+import io.atomix.cluster.BalancingClusterManager;
+import io.atomix.cluster.ClusterManager;
 import io.atomix.copycat.server.storage.Storage;
 import io.atomix.group.DistributedGroup;
 import io.grpc.ServerBuilder;
@@ -92,10 +94,13 @@ public class Server {
 
     public static void main(String[] args) throws IOException, InterruptedException, ParseException {
         Options options = new Options();
-        options.addOption("h", "help", false, "print this message");
-        options.addOption("p", "ports", true, "Set gRPC server port range with format \"start[-end]\"");
-        options.addOption("P", "registry-port", true, "Set service registry server port");
-        options.addOption("j", "join", true, "Join to cluster server with format host:port");
+        options.addOption("h", "help", false, "print this message.");
+        options.addOption("p", "ports", true, "Set gRPC server port range with " +
+                "format \"start[-end]\". Default: 50051.");
+        options.addOption("P", "registry-port", true, "Set service registry server " +
+                "port. Default: 8701.");
+        options.addOption("j", "join", true, "Join to cluster server with format " +
+                "host:port. Default: blank.");
 
         CommandLineParser parser = new DefaultParser();
         CommandLine cmd = parser.parse( options, args);
@@ -106,13 +111,23 @@ public class Server {
             return;
         }
 
-
-
         String portRange = cmd.getOptionValue("p", "50051");
         String[] startEnd = portRange.split("-");
-        Integer serviceRegistryPort = null, startPort = null, endPort = null;
+        String joinHost = null;
+        Integer serviceRegistryPort = null, startPort = null, endPort = null, joinPort = null;
         try {
             serviceRegistryPort = Integer.valueOf(cmd.getOptionValue("P", "8701"));
+            String joinURI = cmd.getOptionValue("j");
+            if (joinURI != null && ! joinURI.equalsIgnoreCase("")) {
+                String[] joinHP = joinURI.split(":");
+                if (joinHP.length == 2) {
+                    joinHost = joinHP[0];
+                    joinPort = Integer.parseInt(joinHP[1]);
+                } else {
+                    logger.severe("Invalid join URI format !!!");
+                    return;
+                }
+            }
 
             if (startEnd.length == 2) {
                 startPort = Integer.valueOf(startEnd[0]);
@@ -137,7 +152,12 @@ public class Server {
                         .withDirectory(System.getProperty("user.dir") + "/logs/" + UUID.randomUUID().toString())
                         .build())
                 .build();
-        replica.bootstrap().join();
+
+        if (joinHost != null && joinPort != null) {
+            replica.join(new Address(joinHost, joinPort)).join();
+        } else {
+            replica.bootstrap().join();
+        }
 
         // Run multiple GRPC servers
         List<Integer> ports = new ArrayList<Integer>();
