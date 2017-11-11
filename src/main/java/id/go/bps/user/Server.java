@@ -167,7 +167,7 @@ public class Server {
         try {
             AtomixClient client = AtomixClient.builder().withTransport(new NettyTransport()).build();
             Atomix atomix = client.connect(new Address("0.0.0.0", serviceRegistryPort)).get();
-            DistributedGroup group = atomix.getGroup("service-helloworld").get();
+            DistributedGroup group = atomix.getGroup("service-user").get();
             // Add the address in metadata
             for(Server server : servers) {
                 group.join(Collections.singletonMap("address",

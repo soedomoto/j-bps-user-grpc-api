@@ -20,6 +20,9 @@ import com.google.protobuf.Empty;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.StatusRuntimeException;
+import io.grpc.stub.StreamObserver;
+import io.grpc.util.RoundRobinLoadBalancerFactory;
+import resolver.AtomixNameResolverFactory;
 
 import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
@@ -33,7 +36,7 @@ public class Client {
     private static final Logger logger = Logger.getLogger(Client.class.getName());
 
     private final ManagedChannel channel;
-    private final PositionServiceGrpc.PositionServiceBlockingStub blockingStub;
+    private final PositionServiceGrpc.PositionServiceStub stub;
 
     /** Construct client connecting to HelloWorld server at {@code host:port}. */
     public Client(String host, int port) {
@@ -47,7 +50,7 @@ public class Client {
     /** Construct client for accessing RouteGuide server using the existing channel. */
     Client(ManagedChannel channel) {
         this.channel = channel;
-        blockingStub = PositionServiceGrpc.newBlockingStub(channel);
+        stub = PositionServiceGrpc.newStub(channel);
     }
 
     public void shutdown() throws InterruptedException {
@@ -59,14 +62,25 @@ public class Client {
         logger.info("Will try to greet " + name + " ...");
         Iterator<Position> response;
         try {
-            response = blockingStub.list(Empty.newBuilder().build());
+            stub.list(Empty.newBuilder().build(), new StreamObserver<Position>() {
+                @Override
+                public void onNext(Position position) {
+                    logger.info("Greeting: " + position.getName());
+                }
+
+                @Override
+                public void onError(Throwable throwable) {
+
+                }
+
+                @Override
+                public void onCompleted() {
+
+                }
+            });
         } catch (StatusRuntimeException e) {
             logger.log(Level.WARNING, "RPC failed: {0}", e.getStatus());
             return;
-        }
-
-        while (response.hasNext()) {
-            logger.info("Greeting: " + response.next().getName());
         }
     }
 
@@ -75,16 +89,26 @@ public class Client {
      * greeting.
      */
     public static void main(String[] args) throws Exception {
-        Client client = new Client("localhost", 50051);
-        try {
+        ManagedChannel channel = ManagedChannelBuilder
+                .forTarget("atomix://localhost:8701/service-user")
+                .nameResolverFactory(new AtomixNameResolverFactory())
+                .loadBalancerFactory(RoundRobinLoadBalancerFactory.getInstance())
+                .usePlaintext(true)
+                .build();
+
+        for(int i=0; i<1000000; i++) {
+//        Client client = new Client("localhost", 50051);
+            Client client = new Client(channel);
+            try {
       /* Access a service running on the local machine on port 50051 */
-            String user = "world";
-            if (args.length > 0) {
-                user = args[0]; /* Use the arg as the name to greet if provided */
+                String user = "world";
+                if (args.length > 0) {
+                    user = args[0]; /* Use the arg as the name to greet if provided */
+                }
+                client.greet(user);
+            } finally {
+                client.shutdown();
             }
-            client.greet(user);
-        } finally {
-            client.shutdown();
         }
     }
 }
