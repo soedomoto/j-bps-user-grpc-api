@@ -99,7 +99,7 @@ public class Server {
                 "format \"start[-end]\". Default: 50051.");
         options.addOption("P", "registry-port", true, "Set service registry server " +
                 "port. Default: 8701.");
-        options.addOption("j", "join", true, "Join to cluster server with format " +
+        options.addOption("j", "join", true, "Join to cluster registry server with format " +
                 "host:port. Default: blank.");
 
         CommandLineParser parser = new DefaultParser();
