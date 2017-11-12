@@ -3,7 +3,6 @@ package id.go.bps.user;
 import com.j256.ormlite.dao.Dao;
 import com.j256.ormlite.dao.DaoManager;
 import com.j256.ormlite.jdbc.JdbcConnectionSource;
-import com.j256.ormlite.stmt.query.In;
 import com.j256.ormlite.support.ConnectionSource;
 import com.j256.ormlite.table.TableUtils;
 import id.go.bps.user.impl.*;
@@ -13,11 +12,9 @@ import io.atomix.AtomixClient;
 import io.atomix.AtomixReplica;
 import io.atomix.catalyst.transport.Address;
 import io.atomix.catalyst.transport.netty.NettyTransport;
-import io.atomix.cluster.BalancingClusterManager;
-import io.atomix.cluster.ClusterManager;
 import io.atomix.copycat.server.storage.Storage;
 import io.atomix.group.DistributedGroup;
-import io.grpc.ServerBuilder;
+import io.grpc.*;
 import org.apache.commons.cli.*;
 
 import java.io.IOException;
@@ -70,11 +67,21 @@ public class Server {
 
     private void start() throws IOException {
         server = ServerBuilder.forPort(port)
-                .addService(new RankServiceGrpcImpl(Server.this))
-                .addService(new PositionServiceGrpcImpl(Server.this))
-                .addService(new SectionServiceGrpcImpl(Server.this))
-                .addService(new UserServiceGrpcImpl(Server.this))
-                .addService(new UserTypeServiceGrpcImpl(Server.this))
+//                .addService(new RankServiceGrpcImpl(Server.this))
+//                .addService(new PositionServiceGrpcImpl(Server.this))
+//                .addService(new SectionServiceGrpcImpl(Server.this))
+//                .addService(new UserServiceGrpcImpl(Server.this))
+//                .addService(new UserTypeServiceGrpcImpl(Server.this))
+                .addService(ServerInterceptors.intercept(new RankServiceGrpcImpl(Server.this),
+                        new LoggerInterceptor()))
+                .addService(ServerInterceptors.intercept(new PositionServiceGrpcImpl(Server.this),
+                        new LoggerInterceptor()))
+                .addService(ServerInterceptors.intercept(new SectionServiceGrpcImpl(Server.this),
+                        new LoggerInterceptor()))
+                .addService(ServerInterceptors.intercept(new UserServiceGrpcImpl(Server.this),
+                        new LoggerInterceptor()))
+                .addService(ServerInterceptors.intercept(new UserTypeServiceGrpcImpl(Server.this),
+                        new LoggerInterceptor()))
                 .build()
                 .start();
         logger.info("User gRPC API Server is started, listening on " + port);
@@ -89,6 +96,15 @@ public class Server {
     private void blockUntilShutdown() throws InterruptedException {
         if (server != null) {
             server.awaitTermination();
+        }
+    }
+
+    private static class LoggerInterceptor implements ServerInterceptor {
+        @Override
+        public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(ServerCall<ReqT, RespT> call, Metadata headers,
+                                                                     ServerCallHandler<ReqT, RespT> next) {
+            logger.info("Received call to " + call.getMethodDescriptor().getFullMethodName());
+            return next.startCall(call, headers);
         }
     }
 

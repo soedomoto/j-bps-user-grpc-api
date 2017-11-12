@@ -96,7 +96,7 @@ public class Client {
                 .usePlaintext(true)
                 .build();
 
-        for(int i=0; i<10000000; i++) {
+        for(int i=0; i<100; i++) {
 //        Client client = new Client("localhost", 50051);
             Client client = new Client(channel);
             try {
