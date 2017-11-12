@@ -12,7 +12,7 @@
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <grpc.version>1.7.0</grpc.version>
-        <atomix.version>1.0.0-rc9</atomix.version>
+        <atomix.version>1.0.8</atomix.version>
         <ormlite.version>5.0</ormlite.version>
         <commons-cli.version>1.4</commons-cli.version>
     </properties>
